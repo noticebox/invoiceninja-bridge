@@ -81,7 +81,7 @@ export async function checkMappings(rt: Runtime, mappings: Mapping[]): Promise<s
       problems.push(`${m.form}: noticebox has no such form`);
       continue;
     }
-    if (!form.states.includes(m.state)) problems.push(`${m.form}: the form has no state "${m.state}" (it has ${form.states.join(", ")})`);
+    if (form.states && !form.states.includes(m.state)) problems.push(`${m.form}: the form has no state "${m.state}" (it has ${form.states.join(", ")})`);
     const fields = new Set(form.fields.map((f) => f.name));
     for (const { field, at } of namedFields(m)) if (!fields.has(field)) problems.push(`${m.form}: the form has no field "${field}" (${at})`);
   }

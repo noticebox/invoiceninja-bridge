@@ -71,6 +71,23 @@ describe("noticebox", () => {
     expect(calls[0]!.url).toBe("https://inbox.test/api/v1/forms/orders");
   });
 
+  it("getForm reads a form as stored: states as plain names, or none (the kind's), and fields without a label", async () => {
+    const { rt } = rtWith((c) =>
+      c.url.endsWith("/forms/plain")
+        ? Response.json({ name: "plain", form: { kind: "message", fields: { a: {}, b: { label: "Bee" } }, states: ["open", { name: "done", closed: true }] } })
+        : Response.json({ name: "bare", form: { kind: "message" } }),
+    );
+    expect(await getForm(rt, "plain")).toEqual({
+      name: "plain",
+      states: ["open", "done"],
+      fields: [
+        { name: "a", type: "text", label: "a" },
+        { name: "b", type: "text", label: "Bee" },
+      ],
+    });
+    expect(await getForm(rt, "bare")).toEqual({ name: "bare", states: null, fields: [] });
+  });
+
   it("getFile returns the bytes", async () => {
     const { rt, calls } = rtWith(() => new Response(new Uint8Array([1, 2, 3])));
     expect(await getFile(rt, "s1", "f1")).toEqual(new Uint8Array([1, 2, 3]));

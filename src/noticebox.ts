@@ -12,7 +12,8 @@ export type Submission = {
   files: { id: string; field: string; name: string; type: string; size: number }[];
 };
 
-export type FormInfo = { name: string; states: string[]; fields: { name: string; type: string; label: string }[] };
+/** A form as the bridge needs it. `states` is null when the form leaves them to its kind's defaults (they aren't listed then). */
+export type FormInfo = { name: string; states: string[] | null; fields: { name: string; type: string; label: string }[] };
 
 const TIMEOUT_MS = 15_000;
 const FILE_TIMEOUT_MS = 120_000;
@@ -45,11 +46,15 @@ export async function getSubmission(rt: Runtime, id: string): Promise<Submission
 export async function getForm(rt: Runtime, name: string): Promise<FormInfo | null> {
   const r = await get(rt, `/forms/${encodeURIComponent(name)}`);
   if (r.status === 404) return null;
-  const body = (await r.json()) as { name: string; form: { fields?: Record<string, { type?: string; label?: string }>; states?: { name: string }[] } };
+  // The form as noticebox stores it (its JSON as written): a state is a name or { name, … }; a field may say nothing but its name.
+  const body = (await r.json()) as {
+    name: string;
+    form: { fields?: Record<string, { type?: string; label?: string } | null>; states?: (string | { name: string })[] };
+  };
   return {
     name: body.name,
-    states: (body.form.states ?? []).map((s) => s.name),
-    fields: Object.entries(body.form.fields ?? {}).map(([n, f]) => ({ name: n, type: f.type ?? "text", label: f.label || n })),
+    states: body.form.states ? body.form.states.map((s) => (typeof s === "string" ? s : s.name)) : null,
+    fields: Object.entries(body.form.fields ?? {}).map(([n, f]) => ({ name: n, type: f?.type ?? "text", label: f?.label || n })),
   };
 }
 
