@@ -30,12 +30,13 @@ sequenceDiagram
     B->>I: client by email, or a new one
     B->>I: draft quote: custom fields, notes
     B->>I: files as private documents
-    Note over B: handover done; a failure is kept, pushed (ntfy) and retried over MCP
+    Note over B: handover done; a failure is kept, pushed (ntfy) and retried by itself
 ```
 
 ## The mapping
 
-One per form, set over MCP (`put_mapping`) or REST, checked against the form as noticebox has it:
+One per form, in a JSON file mounted into the container (`BRIDGE_MAPPINGS`, a list of these), checked at start against the form as
+noticebox has it:
 
 ```json
 {
@@ -63,7 +64,11 @@ One per form, set over MCP (`put_mapping`) or REST, checked against the form as 
 - **B2 Drafts only, never sent:** the person who accepted the request prices and sends the quote in Invoice Ninja.
 - **B3 No personal data of its own:** a handover row holds the noticebox id, the Invoice Ninja ids, the files attached (by noticebox
   file id), a state and an error naming no person, address or file.
-- **B4 A failure is never lost:** the webhook answers 200, the failure is kept, pushed (ntfy) and retried with `retry_handover`.
-  A second post or a retry never makes a second client, quote or document.
-- **B5 next-app-kit** (sign-in only for MCP's OAuth, MCP, REST, API tokens, SQLite), like upload; settings `BRIDGE_*`.
-- **B6 Mappings in the database, edited over MCP and REST**, as noticebox keeps its forms (its ADR 0004); no web pages but sign-in.
+- **B4 A failure is never lost:** the webhook answers 200, the failure is kept and retried by the bridge itself after 1, 2, 4 …
+  60 minutes for 24 hours; one push (ntfy) when it first fails, one when it gives up. A second post or a retry never makes a second
+  client, quote or document.
+- **B5 A plain service, no sign-in, no MCP, no API** (Marcel, 2026-11-20: "it just takes data from one side and pushes it to the
+  other"): Node and TypeScript without a framework, `node:http` with two routes (`POST /hooks/noticebox/<secret>`, `GET /health`),
+  SQLite through kysely and better-sqlite3 for the handover rows, pino logs, settings `BRIDGE_*`. A deliberate exception to the
+  engineering conventions' MCP first: nothing here is for a person to operate.
+- **B6 Mappings in a file**, mounted read-only and validated at start; changed by editing the file and restarting.
