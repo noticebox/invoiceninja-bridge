@@ -32,7 +32,7 @@ void checkMappings(rt, mappings).then((problems) => {
   for (const p of problems) log.warn(p);
 });
 const server = createServer((req, res) => {
-  handle(rt, toRequest(req))
+  handle(rt, mappings, toRequest(req))
     .then((r) => send(res, r))
     .catch((e: unknown) => {
       log.error({ error: e instanceof Error ? e.message : String(e) }, "request failed");
