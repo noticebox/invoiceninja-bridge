@@ -208,6 +208,69 @@ describe("a handover", () => {
   });
 });
 
+describe("review fixes", () => {
+  it("leaves a file Invoice Ninja's size limit refuses (413) and goes on", async () => {
+    const { rt, svc } = setup();
+    svc.failWhen((c) =>
+      c.url.endsWith("/upload") && ((c.body as FormData).get("documents[]") as File).name === "teil.stl.zip" ? new Response(null, { status: 413 }) : undefined,
+    );
+    await receive(rt, MAPPINGS, decided("s1"));
+    expect(svc.documents.map((d) => d.name)).toEqual(["foto.jpg"]);
+    expect(rt.store.handover("s1")).toMatchObject({ state: "done", files_left: 1 });
+  });
+
+  it("leaves a file that is gone from noticebox instead of retrying it for a day", async () => {
+    const req = orderRequest();
+    const { rt, svc } = setup({ submissions: [req] });
+    svc.failWhen((c) => (c.url.endsWith("/files/f1") ? new Response(null, { status: 404 }) : undefined));
+    await receive(rt, MAPPINGS, decided("s1"));
+    expect(rt.store.handover("s1")).toMatchObject({ state: "done", files_left: 1 });
+  });
+
+  it("makes no second quote when the first one's answer was lost", async () => {
+    const { rt, svc, at } = setup();
+    svc.loseAnswerWhen((c) => c.method === "POST" && c.url.endsWith("/api/v1/quotes"));
+    await receive(rt, MAPPINGS, decided("s1"));
+    expect(rt.store.handover("s1")).toMatchObject({ state: "failed", error: "quote: invoiceninja timed out" });
+    svc.loseAnswerWhen(() => false);
+    at(1);
+    await run(rt, MAPPINGS, "s1");
+    expect(svc.quotes.size).toBe(1);
+    expect(rt.store.handover("s1")).toMatchObject({ state: "done", quote_number: "Q-1" });
+    expect(svc.documents).toHaveLength(2);
+  });
+
+  it("attaches no file twice when an upload's answer was lost", async () => {
+    const { rt, svc, at } = setup();
+    svc.loseAnswerWhen((c) => c.url.endsWith("/upload") && ((c.body as FormData).get("documents[]") as File).name === "foto.jpg");
+    await receive(rt, MAPPINGS, decided("s1"));
+    expect(rt.store.handover("s1")!.state).toBe("failed");
+    svc.loseAnswerWhen(() => false);
+    at(1);
+    await run(rt, MAPPINGS, "s1");
+    expect(svc.documents.map((d) => d.name)).toEqual(["teil.stl.zip", "foto.jpg"]);
+    expect(rt.store.handover("s1")!.state).toBe("done");
+  });
+
+  it("keeps the address given for a returning customer when the quote is made on a retry", async () => {
+    const { rt, svc, at } = setup({ clients: [{ id: "c7", name: "Anna", contacts: [{ email: "anna@example.org" }] }] });
+    svc.failWhen((c) => (c.method === "POST" && c.url.endsWith("/api/v1/quotes") ? new Response(null, { status: 500 }) : undefined));
+    await receive(rt, MAPPINGS, decided("s1"));
+    svc.failWhen(() => undefined);
+    at(1);
+    await run(rt, MAPPINGS, "s1");
+    expect([...svc.quotes.values()][0]!.private_notes).toContain("Address given: Hauptstr. 5, 12345 Berlin, Deutschland");
+  });
+
+  it("hands nothing over when the submission isn't in the mapped state in noticebox", async () => {
+    const { rt, svc } = setup({ submissions: [orderRequest({ state: "new" })] });
+    await receive(rt, MAPPINGS, decided("s1"));
+    expect([svc.clients.length, svc.quotes.size]).toEqual([0, 0]);
+    expect(rt.store.handover("s1")).toMatchObject({ state: "given_up", error: 'read: the submission is in "new" in noticebox, not "angenommen"' });
+    expect(svc.pushes.map((p) => p.title)).toEqual([`Handover given up: ${FORM_NAME}`]);
+  });
+});
+
 describe("the zipped model", () => {
   it("holds the file as it came", async () => {
     const { rt, svc } = setup();

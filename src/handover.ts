@@ -4,8 +4,18 @@
 // with the step and the service's status, pushed once, and tried again by retry.ts; after 24 hours it is given up, with a push. Nothing
 // of the submission is stored or logged: ids, counts, states, and errors that name only a step, a service and a status.
 import type { HandoverRow } from "./db/handovers.ts";
-import { forInvoiceNinja, MAX_BYTES } from "./files.ts";
-import { attachToQuote, countryId, createClient, createQuoteDraft, findClientByEmail, updateQuoteNotes, type CustomValues } from "./invoiceninja.ts";
+import { documentName, forInvoiceNinja, MAX_BYTES } from "./files.ts";
+import {
+  attachToQuote,
+  countryId,
+  createClient,
+  createQuoteDraft,
+  findClientByEmail,
+  findQuoteFor,
+  quoteDocumentNames,
+  updateQuoteNotes,
+  type CustomValues,
+} from "./invoiceninja.ts";
 import { namedFields, type Mapping } from "./mapping.ts";
 import { quoteNotes } from "./notes.ts";
 import { getFile, getForm, getSubmission, type Submission } from "./noticebox.ts";
@@ -21,11 +31,20 @@ type Step = "read" | "client" | "quote" | "files";
 /** A failure the bridge names itself (not a service's answer). */
 class HandoverError extends Error {}
 
-// Per store: the submissions whose handover is running now, so the hook and the retry timer never run one twice at once.
-const running = new WeakMap<object, Set<string>>();
+// Per store: the handovers running now, so the hook and the retry timer never run one twice at once, and tests can wait for them.
+const running = new WeakMap<object, Map<string, Promise<HandoverRow | undefined>>>();
 
-/** noticebox's post: a handover when it is a decision to a mapped form's state; anything else is ignored. */
-export async function receive(rt: Runtime, mappings: Mapping[], body: unknown): Promise<{ taken: "handover" | "ignored" }> {
+/** Waits until no handover of this runtime is running. */
+export async function whenIdle(rt: Runtime): Promise<void> {
+  const now = running.get(rt.store);
+  while (now && now.size > 0) await Promise.allSettled([...now.values()]);
+}
+
+/**
+ * noticebox's post, taken: a decision to a mapped form's state records the handover (a second post of it changes nothing) and says
+ * which submission to run; anything else is ignored.
+ */
+export function accept(rt: Runtime, mappings: Mapping[], body: unknown): { taken: "handover"; id: string } | { taken: "ignored" } {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const m = mappings.find((x) => x.form === b.form);
   if (b.event !== "decided" || typeof b.id !== "string" || !m || b.to !== m.state) {
@@ -34,21 +53,25 @@ export async function receive(rt: Runtime, mappings: Mapping[], body: unknown): 
   }
   const now = rt.clock().toISOString();
   if (rt.store.insertHandover(b.id, m.form, now)) rt.log.info({ submission: b.id, form: m.form }, "handover: received");
-  await run(rt, mappings, b.id);
-  return { taken: "handover" };
+  return { taken: "handover", id: b.id };
+}
+
+/** accept(), then the handover run to its end. */
+export async function receive(rt: Runtime, mappings: Mapping[], body: unknown): Promise<{ taken: "handover" | "ignored" }> {
+  const a = accept(rt, mappings, body);
+  if (a.taken === "handover") await run(rt, mappings, a.id);
+  return { taken: a.taken };
 }
 
 /** Runs the handover of `id` from where it stands; a done or given-up one is left alone. */
 export async function run(rt: Runtime, mappings: Mapping[], id: string): Promise<HandoverRow | undefined> {
-  const busy = running.get(rt.store) ?? new Set<string>();
+  const busy = running.get(rt.store) ?? new Map<string, Promise<HandoverRow | undefined>>();
   running.set(rt.store, busy);
-  if (busy.has(id)) return rt.store.handover(id);
-  busy.add(id);
-  try {
-    return await attempt(rt, mappings, id);
-  } finally {
-    busy.delete(id);
-  }
+  const already = busy.get(id);
+  if (already) return already;
+  const p = attempt(rt, mappings, id).finally(() => busy.delete(id));
+  busy.set(id, p);
+  return p;
 }
 
 async function attempt(rt: Runtime, mappings: Mapping[], id: string): Promise<HandoverRow | undefined> {
@@ -63,6 +86,9 @@ async function attempt(rt: Runtime, mappings: Mapping[], id: string): Promise<Ha
     if (!m) throw new HandoverError(`no mapping for the form ${row.form} any more`);
     const s = await getSubmission(rt, id);
     if (!s) throw new HandoverError("the submission is gone from noticebox");
+    // Nothing is written to Invoice Ninja unless noticebox says the submission is in the handover state: the post is unsigned, and the
+    // person may have moved it on while an earlier try waited (V1).
+    if (!row.client_id && s.state !== m.state) return giveUp(rt, row, `read: the submission is in "${s.state}" in noticebox, not "${m.state}"`, attempts);
     const form = await getForm(rt, s.form);
     if (!form) throw new HandoverError("the form is gone from noticebox");
     const fields = new Set(form.fields.map((f) => f.name));
@@ -71,20 +97,29 @@ async function attempt(rt: Runtime, mappings: Mapping[], id: string): Promise<Ha
 
     step = "client";
     let clientId = row.client_id;
-    let existed = false;
+    let existed = row.client_existed === 1;
     if (!clientId) {
       const email = (s.fields[m.client.email] ?? "").trim();
       if (!email) throw new HandoverError(`the submission has no email in ${m.client.email}`);
       clientId = await findClientByEmail(rt, email);
       existed = clientId !== null;
       clientId ??= await createClient(rt, await clientFrom(rt, s, m, email));
-      rt.store.updateHandover(id, { client_id: clientId }, now());
+      rt.store.updateHandover(id, { client_id: clientId, client_existed: existed ? 1 : 0 }, now());
     }
 
     step = "quote";
     let quoteId = row.quote_id;
     let quoteNumber = row.quote_number;
     const addressGiven = existed ? addressOf(s, m) : undefined;
+    // A retry looks first for a quote an earlier try made but never heard back about (a timeout, a crash).
+    if (!quoteId && attempts > 1) {
+      const found = await findQuoteFor(rt, clientId, `Request from noticebox: ${s.url}`);
+      if (found) {
+        quoteId = found.id;
+        quoteNumber = found.number;
+        rt.store.updateHandover(id, { quote_id: quoteId, quote_number: quoteNumber }, now());
+      }
+    }
     if (!quoteId) {
       const made = await createQuoteDraft(rt, { clientId, privateNotes: quoteNotes(s, form, m, { left: [], addressGiven }), customValues: customValues(s, m) });
       quoteId = made.id;
@@ -95,9 +130,21 @@ async function attempt(rt: Runtime, mappings: Mapping[], id: string): Promise<Ha
     step = "files";
     const done = new Set<string>(JSON.parse(row.files_done) as string[]);
     const left: Submission["files"] = [];
+    // On a retry, what an earlier try attached without hearing back counts as attached.
+    const there = attempts > 1 && s.files.some((f) => !done.has(f.id)) ? await quoteDocumentNames(rt, quoteId) : new Set<string>();
     for (const f of s.files) {
       if (done.has(f.id)) continue;
-      const out = forInvoiceNinja({ name: f.name, type: f.type, bytes: await getFile(rt, id, f.id) });
+      if (there.has(documentName(f))) {
+        done.add(f.id);
+        rt.store.updateHandover(id, { files_done: JSON.stringify([...done]) }, now());
+        continue;
+      }
+      const bytes = await getFile(rt, id, f.id);
+      if (!bytes) {
+        left.push(f);
+        continue;
+      }
+      const out = forInvoiceNinja({ name: f.name, type: f.type, bytes });
       if (out.bytes.length > MAX_BYTES) {
         left.push(f);
         continue;
@@ -105,7 +152,8 @@ async function attempt(rt: Runtime, mappings: Mapping[], id: string): Promise<Ha
       try {
         await attachToQuote(rt, quoteId, out);
       } catch (e) {
-        if (e instanceof ServiceError && e.status === 422) {
+        // 422: Invoice Ninja refuses the file; 413: its PHP or web server finds it too large.
+        if (e instanceof ServiceError && (e.status === 422 || e.status === 413)) {
           left.push(f);
           continue;
         }
@@ -137,18 +185,25 @@ async function failed(rt: Runtime, row: HandoverRow, step: Step, e: unknown, att
   if (!(e instanceof ServiceError || e instanceof HandoverError))
     rt.log.error({ submission: row.submission_id, step, error: e instanceof Error ? e.name : "error" }, "handover: unexpected error");
   const now = rt.clock();
-  const link = `${rt.config.noticebox.url}/forms/${encodeURIComponent(row.form)}/submissions/${encodeURIComponent(row.submission_id)}`;
-  if (now.getTime() - Date.parse(row.received_at) >= GIVE_UP_MS) {
-    rt.store.updateHandover(row.submission_id, { state: "given_up", error, next_try: null }, now.toISOString());
-    rt.log.warn({ submission: row.submission_id, form: row.form, error, attempts }, "handover: given up");
-    await push(rt, { title: `Handover given up: ${row.form}`, message: `${error}. Tried for 24 hours; hand it over by hand from noticebox.`, click: link });
-    return rt.store.handover(row.submission_id);
-  }
+  if (now.getTime() - Date.parse(row.received_at) >= GIVE_UP_MS)
+    return giveUp(rt, row, error, attempts, "Tried for 24 hours; hand it over by hand from noticebox.");
+  const link = linkTo(rt, row);
   const wait = Math.min(LONGEST_WAIT_MIN, 2 ** (attempts - 1));
   const next = new Date(now.getTime() + wait * 60_000).toISOString();
   rt.store.updateHandover(row.submission_id, { state: "failed", error, next_try: next }, now.toISOString());
   rt.log.warn({ submission: row.submission_id, form: row.form, error, attempts, next }, "handover: failed");
   if (row.state !== "failed") await push(rt, { title: `Handover failed: ${row.form}`, message: `${error}. It is tried again by itself.`, click: link });
+  return rt.store.handover(row.submission_id);
+}
+
+const linkTo = (rt: Runtime, row: HandoverRow) =>
+  `${rt.config.noticebox.url}/forms/${encodeURIComponent(row.form)}/submissions/${encodeURIComponent(row.submission_id)}`;
+
+/** No more tries: recorded, logged and pushed. */
+async function giveUp(rt: Runtime, row: HandoverRow, error: string, attempts: number, advice = "Nothing was handed over."): Promise<HandoverRow | undefined> {
+  rt.store.updateHandover(row.submission_id, { state: "given_up", error, next_try: null }, rt.clock().toISOString());
+  rt.log.warn({ submission: row.submission_id, form: row.form, error, attempts }, "handover: given up");
+  await push(rt, { title: `Handover given up: ${row.form}`, message: `${error}. ${advice}`, click: linkTo(rt, row) });
   return rt.store.handover(row.submission_id);
 }
 

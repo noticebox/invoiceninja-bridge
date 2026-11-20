@@ -86,6 +86,23 @@ export async function createQuoteDraft(
   return { id: data.id, number: data.number };
 }
 
+/**
+ * The client's quote whose private notes start with `marker` (the link to its submission), or null: a quote made by an earlier try whose
+ * answer was lost, so a retry doesn't make a second one.
+ */
+export async function findQuoteFor(rt: Runtime, clientId: string, marker: string): Promise<{ id: string; number: string } | null> {
+  const q = new URLSearchParams({ client_id: clientId, per_page: "100", sort: "id|desc" });
+  const { data } = await api<{ data: { id: string; number: string; private_notes?: string }[] }>(rt, "GET", `/quotes?${q}`);
+  const hit = data.find((x) => (x.private_notes ?? "").startsWith(marker));
+  return hit ? { id: hit.id, number: hit.number } : null;
+}
+
+/** The names of the quote's documents: what an earlier try attached although its answer was lost. */
+export async function quoteDocumentNames(rt: Runtime, quoteId: string): Promise<Set<string>> {
+  const { data } = await api<{ data: { documents?: { name?: string }[] } }>(rt, "GET", `/quotes/${encodeURIComponent(quoteId)}`);
+  return new Set((data.documents ?? []).map((d) => d.name ?? ""));
+}
+
 /** Replaces the quote's private notes, nothing else. */
 export async function updateQuoteNotes(rt: Runtime, quoteId: string, privateNotes: string): Promise<void> {
   await api(rt, "PUT", `/quotes/${encodeURIComponent(quoteId)}`, { private_notes: privateNotes });

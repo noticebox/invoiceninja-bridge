@@ -72,4 +72,14 @@ describe("retries", () => {
     expect(svc.pushes.map((p) => p.title)).toEqual([`Handover failed: ${FORM_NAME}`, `Handover given up: ${FORM_NAME}`]);
     expect(svc.pushes[1]!.message).toBe("client: invoiceninja answered 503. Tried for 24 hours; hand it over by hand from noticebox.");
   });
+  it("picks up a handover left pending by a crash, once it has been still for 15 minutes", async () => {
+    const { rt, svc, at } = setup();
+    svc.failWhen(() => undefined);
+    rt.store.insertHandover("s1", FORM_NAME, new Date(T0).toISOString());
+    at(10);
+    expect(await retryDue(rt, MAPPINGS)).toBe(0);
+    at(16);
+    expect(await retryDue(rt, MAPPINGS)).toBe(1);
+    expect(rt.store.handover("s1")!.state).toBe("done");
+  });
 });

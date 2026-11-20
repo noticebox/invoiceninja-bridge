@@ -21,8 +21,9 @@ sequenceDiagram
 ## What it does
 
 - **Only what you accepted.** A submission is handed over when you move it to the state its form's [mapping](mapping.md) names,
-  and not before. Spam and declined requests never reach your bookkeeping, and noticebox deletes them as it always does.
-- **The client:** found by the submission's email (case ignored), so a returning customer keeps their client. A new one gets the name
+  and not before: the bridge checks in noticebox that it is in that state before it writes anything. Spam and declined requests never reach your bookkeeping, and noticebox deletes them as it always does.
+- **The client:** found by the submission's email (case ignored) among the active clients, so a returning customer keeps their
+  client (an archived one is not looked at: restore it first, or merge the two afterwards). A new one gets the name
   (first word as the first name) and the address. For an existing client, the address as given is noted on the quote.
 - **The quote:** a draft without lines, for you to price. The fields the mapping names go into the quote's custom fields; every other
   field goes into its private notes under the form's own label, in the form's order, with a link back to the submission.
@@ -30,8 +31,8 @@ sequenceDiagram
   anything else (an STL, a 3MF, a STEP) zipped, because Invoice Ninja doesn't take model files ([ADR 0003](adr/0003-files-zipped-for-invoice-ninja.md)).
   A file that is too large or refused stays in noticebox and is named in the notes.
 - **Never lost, never twice.** If noticebox or Invoice Ninja is down, the bridge tries again by itself after 1, 2, 4 … up to 60
-  minutes for 24 hours, and pushes to you (ntfy) when a handover first fails and when it gives up. A second post or a retry never makes
-  a second client, quote or document.
+  minutes for 24 hours, and pushes to you (ntfy) when a handover first fails and when it gives up; a handover cut off by a restart is
+  picked up again. A second post or a retry never makes a second client, quote or document, also when an earlier try's answer was lost.
 
 ## What it never does
 

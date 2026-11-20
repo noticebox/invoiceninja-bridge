@@ -10,6 +10,11 @@ export const MAX_BYTES = 100_000 * 1024;
 
 const AS_THEY_ARE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/tiff", "application/pdf"]);
 
+/** The document's name in Invoice Ninja for a file of this name and type. */
+export function documentName(f: { name: string; type: string }): string {
+  return AS_THEY_ARE.has(f.type.toLowerCase()) ? f.name : `${f.name}.zip`;
+}
+
 export function forInvoiceNinja(f: FileBytes): FileBytes {
   if (AS_THEY_ARE.has(f.type.toLowerCase())) return f;
   return { name: `${f.name}.zip`, type: "application/zip", bytes: zipSync({ [f.name]: [f.bytes, { level: 6 }] }) };

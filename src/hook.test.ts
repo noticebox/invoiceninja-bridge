@@ -1,6 +1,7 @@
 import { Writable } from "node:stream";
 import pino from "pino";
 import { afterEach, describe, expect, it } from "vitest";
+import { whenIdle } from "./handover.ts";
 import { handle } from "./server.ts";
 import { decided, FORM_NAME, ORDER_FORM, ORDER_MAPPING, orderRequest } from "./testing/orders.ts";
 import { testRuntime, type TestRuntime } from "./testing/runtime.ts";
@@ -34,11 +35,15 @@ describe("the noticebox hook", () => {
     expect(svc.calls).toEqual([]);
   });
 
-  it("answers 200 to a handover decision once the handover ran", async () => {
+  it("answers 200 to a handover decision at once, and the handover runs after", async () => {
     const { rt, svc } = setup();
+    const release = svc.hold();
     const r = await handle(rt, MAPPINGS, post(SECRET, JSON.stringify(decided("s1"))));
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ taken: "handover" });
+    expect(svc.quotes.size).toBe(0);
+    release();
+    await whenIdle(rt);
     expect(svc.quotes.size).toBe(1);
   });
 
@@ -59,12 +64,14 @@ describe("the noticebox hook", () => {
     const { rt, svc } = setup();
     svc.failWhen((c) => (c.url.startsWith("https://invoices.test") ? new Response(null, { status: 503 }) : undefined));
     expect((await handle(rt, MAPPINGS, post(SECRET, JSON.stringify(decided("s1"))))).status).toBe(200);
+    await whenIdle(rt);
     expect(rt.store.handover("s1")!.state).toBe("failed");
   });
 
   it("never writes the secret to the log", async () => {
     const { rt, lines } = setup();
     await handle(rt, MAPPINGS, post(SECRET, JSON.stringify(decided("s1"))));
+    await whenIdle(rt);
     await handle(rt, MAPPINGS, post("wrong", "{}"));
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.join("")).not.toContain(SECRET);

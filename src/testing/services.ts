@@ -26,6 +26,8 @@ export function fakeServices(rt: Runtime, base: { forms?: Record<string, FakeFor
   const documents: FakeDocument[] = [];
   const pushes: { title: string; message: string; click?: string }[] = [];
   let fail: (c: Call) => Response | undefined = () => undefined;
+  let lose: (c: Call) => boolean = () => false;
+  let gate: Promise<void> = Promise.resolve();
   let n = 0;
 
   const nb = rt.config.noticebox.url;
@@ -33,6 +35,14 @@ export function fakeServices(rt: Runtime, base: { forms?: Record<string, FakeFor
   const f = fakeFetch(async (c) => {
     const refused = fail(c);
     if (refused) return refused;
+    if (c.url.startsWith(`${rt.config.invoiceNinja.url}/`)) await gate;
+    const answer = await serve(c);
+    // Invoice Ninja did it, but the answer never came back (a timeout on the bridge's side).
+    if (lose(c)) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    return answer;
+  });
+
+  async function serve(c: Call): Promise<Response> {
     const url = new URL(c.url);
     if (c.url.startsWith(rt.config.ntfyUrl ?? "\0")) {
       pushes.push({ title: c.headers.title!, message: String(c.body), ...(c.headers.click ? { click: c.headers.click } : {}) });
@@ -99,6 +109,12 @@ export function fakeServices(rt: Runtime, base: { forms?: Record<string, FakeFor
         clients.push(client);
         return Response.json({ data: { id: client.id } });
       }
+      if (path === "/quotes" && c.method === "GET") {
+        const clientId = url.searchParams.get("client_id");
+        return Response.json({
+          data: [...quotes.values()].filter((q) => q.client_id === clientId).map((q) => ({ id: q.id, number: q.number, private_notes: q.private_notes })),
+        });
+      }
       if (path === "/quotes" && c.method === "POST") {
         const { client_id, private_notes, line_items, ...custom } = JSON.parse(String(c.body)) as Record<string, unknown>;
         const id = `q${++n}`;
@@ -121,6 +137,11 @@ export function fakeServices(rt: Runtime, base: { forms?: Record<string, FakeFor
         return Response.json({ data: { id: m[1] } });
       }
       m = path.match(/^\/quotes\/([^/]+)$/);
+      if (m && c.method === "GET") {
+        const q = quotes.get(m[1]!);
+        if (!q) return new Response(null, { status: 404 });
+        return Response.json({ data: { id: q.id, number: q.number, documents: documents.filter((d) => d.quoteId === q.id).map((d) => ({ name: d.name })) } });
+      }
       if (m && c.method === "PUT") {
         const q = quotes.get(m[1]!);
         if (!q) return new Response(null, { status: 404 });
@@ -130,7 +151,7 @@ export function fakeServices(rt: Runtime, base: { forms?: Record<string, FakeFor
       return new Response(null, { status: 404 });
     }
     throw new Error(`a test reached the network: ${c.url}`);
-  });
+  }
   rt.fetch = f.fetch;
   return {
     calls: f.calls,
@@ -142,5 +163,13 @@ export function fakeServices(rt: Runtime, base: { forms?: Record<string, FakeFor
     pushes,
     /** Refuse the calls `rule` answers for, until it is replaced. */
     failWhen: (rule: (c: Call) => Response | undefined) => void (fail = rule),
+    /** Do the calls `rule` picks, then lose their answers (the bridge times out). */
+    loseAnswerWhen: (rule: (c: Call) => boolean) => void (lose = rule),
+    /** Hold every call to Invoice Ninja until the returned function is called. */
+    hold: () => {
+      let release!: () => void;
+      gate = new Promise((r) => (release = r));
+      return release;
+    },
   };
 }

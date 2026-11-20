@@ -5,7 +5,7 @@ import type { HandoversTable } from "./schema.ts";
 
 export type HandoverRow = Selectable<HandoversTable>;
 export type HandoverPatch = Partial<
-  Pick<HandoverRow, "state" | "client_id" | "quote_id" | "quote_number" | "files_done" | "files_left" | "attempts" | "next_try" | "error">
+  Pick<HandoverRow, "state" | "client_id" | "client_existed" | "quote_id" | "quote_number" | "files_done" | "files_left" | "attempts" | "next_try" | "error">
 >;
 
 export function handoverQueries({ q, all, first, run }: Exec) {
@@ -27,10 +27,22 @@ export function handoverQueries({ q, all, first, run }: Exec) {
           .where("submission_id", "=", id),
       );
     },
-    /** The failed handovers whose next try is due at `now`, oldest first. */
-    dueHandovers: (now: string): string[] =>
-      all(q.selectFrom("handovers").select("submission_id").where("state", "=", "failed").where("next_try", "<=", now).orderBy("next_try")).map(
-        (r) => r.submission_id,
-      ),
+    /**
+     * The handovers to run now: failed ones whose next try is due, and pending ones untouched since `staleBefore` (a run that a crash or
+     * a restart cut off; a running one writes after every step).
+     */
+    dueHandovers: (now: string, staleBefore: string): string[] =>
+      all(
+        q
+          .selectFrom("handovers")
+          .select("submission_id")
+          .where((eb) =>
+            eb.or([
+              eb.and([eb("state", "=", "failed"), eb("next_try", "<=", now)]),
+              eb.and([eb("state", "=", "pending"), eb("updated_at", "<=", staleBefore)]),
+            ]),
+          )
+          .orderBy("received_at"),
+      ).map((r) => r.submission_id),
   };
 }

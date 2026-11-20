@@ -6,7 +6,8 @@ export const MIGRATIONS: Migration[] = [
   {
     // One row per submission handed over: noticebox's id, Invoice Ninja's ids, which of its files are attached (noticebox file ids),
     // how many were left in noticebox, and how the last try went. No field of the submission, no name, address or file name (design B3).
-    // given_up: failed for 24 hours, no more tries.
+    // client_existed: 1 when the client was found by email, so the quote notes the address given. given_up: failed for 24 hours, or the
+    // submission wasn't in the handover state; no more tries.
     name: "handovers",
     sql: `
       create table handovers (
@@ -14,6 +15,7 @@ export const MIGRATIONS: Migration[] = [
         form text not null,
         state text not null check (state in ('pending', 'done', 'failed', 'given_up')),
         client_id text,
+        client_existed integer not null default 0,
         quote_id text,
         quote_number text,
         files_done text not null default '[]',

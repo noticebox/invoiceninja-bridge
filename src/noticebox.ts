@@ -53,9 +53,9 @@ export async function getForm(rt: Runtime, name: string): Promise<FormInfo | nul
   };
 }
 
-/** A file that came with the submission, as bytes. */
-export async function getFile(rt: Runtime, submissionId: string, fileId: string): Promise<Uint8Array> {
+/** A file that came with the submission, as bytes; null when noticebox doesn't have it (any more). */
+export async function getFile(rt: Runtime, submissionId: string, fileId: string): Promise<Uint8Array | null> {
   const r = await get(rt, `/submissions/${encodeURIComponent(submissionId)}/files/${encodeURIComponent(fileId)}`, FILE_TIMEOUT_MS);
-  if (r.status === 404) throw new Error("the file is gone from noticebox");
+  if (r.status === 404) return null;
   return new Uint8Array(await r.arrayBuffer());
 }

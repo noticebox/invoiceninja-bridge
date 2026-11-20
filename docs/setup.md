@@ -21,6 +21,17 @@ docker compose up -d
 docker compose logs invoiceninja-bridge   # "mappings read", and a warning for anything that doesn't fit its form
 ```
 
+The container needs about 512 MB of memory: a file is held in memory while it is zipped and uploaded, one at a time, and a request may
+bring files of up to noticebox's limit. To reach the bridge by its name from noticebox, put both on one Docker network, e.g. add to
+`compose.yaml`:
+
+```yaml
+    networks: [noticebox]
+networks:
+  noticebox:
+    external: true
+```
+
 A bad `.env` or `mappings.json` stops the start, naming each problem. Whether the mappings fit the forms as noticebox has them is
 checked at start too and logged, never stopping the start (noticebox may be down at that moment).
 

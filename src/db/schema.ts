@@ -7,6 +7,8 @@ export interface HandoversTable {
   form: string;
   state: "pending" | "done" | "failed" | "given_up";
   client_id: string | null;
+  /** 0 or 1. */
+  client_existed: Generated<number>;
   quote_id: string | null;
   quote_number: string | null;
   /** A JSON list of noticebox file ids. */
