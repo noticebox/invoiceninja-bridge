@@ -1,0 +1,11 @@
+# invoiceninja-bridge beside noticebox. Settings in .env (from .env.example), the mappings in mappings.json next to this file.
+# noticebox's webhook posts to http://invoiceninja-bridge:8080/hooks/noticebox/<secret> when both are on one Docker network.
+name: invoiceninja-bridge
+services:
+  invoiceninja-bridge:
+    image: ghcr.io/noticebox/invoiceninja-bridge:0.1.0
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+      - ./mappings.json:/config/mappings.json:ro

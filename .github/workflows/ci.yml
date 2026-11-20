@@ -1,0 +1,91 @@
+name: ci
+on:
+  # Every branch, so work in progress is checked before its pull request; images are published from main (:main) and from tags.
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  # Keep the job's name: main's ruleset requires it.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+  image:
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      # A release is exactly what package.json says it is: a tag that names another version builds nothing.
+      - name: The tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "${GITHUB_REF_NAME#v}" = "$(node -p 'require("./package.json").version')" || { echo "tag $GITHUB_REF_NAME does not match package.json $(node -p 'require("./package.json").version')"; exit 1; }
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+      # The image is started once before it is pushed: an image that builds but cannot start must never reach a server.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: invoiceninja-bridge:smoke
+      - name: The image starts and answers
+        run: |
+          echo '[]' > /tmp/mappings.json
+          docker run -d --name smoke -p 127.0.0.1:8080:8080 -v /tmp/mappings.json:/config/mappings.json:ro \
+            -e BRIDGE_NOTICEBOX_URL=http://noticebox.invalid -e BRIDGE_NOTICEBOX_TOKEN=x -e BRIDGE_HOOK_SECRET="$(openssl rand -hex 32)" \
+            -e BRIDGE_INVOICENINJA_URL=http://invoiceninja.invalid -e BRIDGE_INVOICENINJA_TOKEN=y invoiceninja-bridge:smoke
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/health && break; sleep 1; done
+          test "$(curl -s http://127.0.0.1:8080/health)" = '{"status":"ok"}'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/hooks/noticebox/wrong)" = 404
+          # Outgoing HTTPS trusts the system store.
+          docker inspect --format '{{json .Config.Entrypoint}}' invoiceninja-bridge:smoke | grep -q -- --use-system-ca
+          docker logs smoke
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Attached to the image in the registry: what it contains, and how and from which commit it was built.
+          sbom: true
+          provenance: mode=max
+  # The GitHub release, once the image is pushed: its notes are the pull requests merged since the last tag.
+  release:
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}
