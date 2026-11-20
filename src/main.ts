@@ -1,10 +1,12 @@
-// The process: reads the settings (a bad one stops the start, naming it), opens bridge.sqlite, and serves handle() on PORT. node:http
+// The process: reads the settings and the mappings (a bad one stops the start, naming it), opens bridge.sqlite, checks the mappings
+// against noticebox's forms (logged only: noticebox may be down at that moment), and serves handle() on PORT. node:http
 // requests become Web Requests for handle() and its Responses go back as they are. SIGTERM (docker stop) closes the server and the
 // database before the process ends.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { loadConfig } from "./config.ts";
 import { log } from "./log.ts";
+import { checkMappings, loadMappings } from "./mapping.ts";
 import { openRuntime } from "./runtime.ts";
 import { handle } from "./server.ts";
 
@@ -21,7 +23,12 @@ async function send(res: ServerResponse, r: Response): Promise<void> {
 }
 
 const config = loadConfig(process.env);
+const mappings = loadMappings(config.mappingsPath);
 const rt = openRuntime(config);
+log.info({ forms: mappings.map((m) => m.form) }, "mappings read");
+void checkMappings(rt, mappings).then((problems) => {
+  for (const p of problems) log.warn(p);
+});
 const server = createServer((req, res) => {
   handle(rt, toRequest(req))
     .then((r) => send(res, r))
