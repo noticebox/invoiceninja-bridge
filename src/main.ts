@@ -1,5 +1,6 @@
 // The process: reads the settings and the mappings (a bad one stops the start, naming it), opens bridge.sqlite, checks the mappings
-// against noticebox's forms (logged only: noticebox may be down at that moment), and serves handle() on PORT. node:http
+// against noticebox's forms (logged only: noticebox may be down at that moment), serves handle() on PORT and retries failed handovers
+// every minute. node:http
 // requests become Web Requests for handle() and its Responses go back as they are. SIGTERM (docker stop) closes the server and the
 // database before the process ends.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -7,6 +8,7 @@ import { Readable } from "node:stream";
 import { loadConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { checkMappings, loadMappings } from "./mapping.ts";
+import { startRetries } from "./retry.ts";
 import { openRuntime } from "./runtime.ts";
 import { handle } from "./server.ts";
 
@@ -38,9 +40,11 @@ const server = createServer((req, res) => {
       res.end();
     });
 });
+const stopRetries = startRetries(rt, mappings);
 server.listen(config.port, () => log.info({ port: config.port }, "invoiceninja-bridge started"));
 
 process.on("SIGTERM", () => {
+  stopRetries();
   server.close(() => {
     rt.store.close();
     process.exit(0);
