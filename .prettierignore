@@ -5,3 +5,6 @@ docs/superpowers/
 # Agent workflow scratch.
 .superpowers/
 dist/
+# MkDocs Markdown: nested lists and admonitions by four spaces, which Prettier would rewrite.
+docs/**/*.md
+site/

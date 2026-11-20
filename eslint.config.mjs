@@ -24,5 +24,7 @@ export default tseslint.config(
     },
   },
   { files: ["*.mjs"], languageOptions: { globals: { process: "readonly" } } },
+  // The docs site's script runs in the browser beside Mermaid's global.
+  { files: ["docs/javascripts/*.js"], languageOptions: { globals: { mermaid: "readonly", document: "readonly", window: "readonly" } } },
   prettier,
 );
