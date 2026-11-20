@@ -1,0 +1,7 @@
+.superpowers/
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+site/
+__pycache__/

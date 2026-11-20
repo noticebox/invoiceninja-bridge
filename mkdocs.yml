@@ -1,0 +1,90 @@
+site_name: invoiceninja-bridge
+site_description: An accepted noticebox submission becomes a draft quote in Invoice Ninja.
+site_url: https://noticebox.github.io/invoiceninja-bridge/
+repo_url: https://github.com/noticebox/invoiceninja-bridge
+repo_name: noticebox/invoiceninja-bridge
+edit_uri: edit/main/docs/
+exclude_docs: |
+  superpowers/
+copyright: AGPL-3.0-only
+
+theme:
+  name: material
+  font:
+    text: Atkinson Hyperlegible
+    code: Atkinson Hyperlegible Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  logo: assets/icon.svg
+  favicon: assets/icon.svg
+  features:
+    - navigation.instant
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - content.action.edit
+    - content.code.copy
+    - navigation.footer
+    - search.highlight
+    - navigation.sections
+    - navigation.indexes
+
+plugins:
+  - search
+
+hooks:
+  - docs_hooks/roadmap.py
+
+extra_css:
+  - stylesheets/extra.css
+
+# Mermaid pinned, so a new release can't change the diagrams' look; mermaid.js adds the palette rules it lacks.
+extra_javascript:
+  - https://unpkg.com/mermaid@11.17.2/dist/mermaid.min.js
+  - javascripts/mermaid.js
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.keys
+
+validation:
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - What the bridge stands for: values.md
+  - Where it is going: roadmap.md
+  - Setup: setup.md
+  - The mapping: mapping.md
+  - Configuration: configuration.md
+  - Decisions:
+      - "0001: A bridge, not a noticebox feature": adr/0001-a-bridge-not-a-noticebox-feature.md
+      - "0002: Drafts only": adr/0002-drafts-only.md
+      - "0003: Files zipped for Invoice Ninja": adr/0003-files-zipped-for-invoice-ninja.md
+      - "0004: No sign-in, no MCP": adr/0004-no-sign-in-no-mcp.md
