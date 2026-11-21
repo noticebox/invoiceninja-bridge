@@ -25,5 +25,5 @@ noticebox, so anyone who quotes in Invoice Ninja for requests from a noticebox f
 ### Consequences
 
 - Good: noticebox stays an inbox; the person's decision is what starts a read by their token (noticebox's V1, this project's V1).
-- Good: the order flow's printing part (3D-Bruckner/orders) talks only to Invoice Ninja.
+- Good: the order flow's printing part (3D-Bruckner/print-bridge) talks only to Invoice Ninja.
 - Bad: one more container to run, next to noticebox.

@@ -1,6 +1,6 @@
 # invoiceninja-bridge: an accepted noticebox submission becomes a draft quote in Invoice Ninja
 
-Status: agreed 2026-11-20. Part of 3dbruckner.de's order flow (`3D-Bruckner/orders`, `docs/superpowers/specs/2026-11-20-order-flow-design.md`,
+Status: agreed 2026-11-20. Part of 3dbruckner.de's order flow (`3D-Bruckner/print-bridge`, `docs/superpowers/specs/2026-11-20-order-flow-design.md`,
 D9), built generic and open source for anyone who takes requests with a noticebox form and quotes in Invoice Ninja.
 
 ## What it does
