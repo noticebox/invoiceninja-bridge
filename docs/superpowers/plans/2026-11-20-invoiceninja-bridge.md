@@ -12,7 +12,7 @@ resumable: read → client → quote → files, each result stored before the ne
 **Tech Stack:** Node 26, TypeScript (built with `tsc` to `dist/`), kysely + better-sqlite3, zod, pino, fflate, Vitest, ESLint
 (typescript-eslint), Prettier 160, Docker, Material for MkDocs.
 
-**Spec:** `docs/superpowers/specs/2026-11-20-invoiceninja-bridge-design.md`; the order flow it serves: 3D-Bruckner/orders
+**Spec:** `docs/superpowers/specs/2026-11-20-invoiceninja-bridge-design.md`; the order flow it serves: 3D-Bruckner/print-bridge
 `docs/superpowers/specs/2026-11-20-order-flow-design.md`.
 
 ## Global Constraints
